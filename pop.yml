@@ -1,0 +1,59 @@
+---
+- hosts: all
+  tasks:
+    - name: Install packages
+      apt: state=latest update_cache=yes name={{ item }}
+      with_items:
+        - nginx-light
+        - chrony
+        - ca-certificates
+    - name: Enable chrony
+      service: name=chrony enabled=yes state=started
+    - name: Install dhparams.pem
+      copy: src=dhparams.pem dest=/etc/ssl/dhparams.pem mode=0644 owner=root group=root
+      notify: reload nginx
+    - name: Add CertBot PPA
+      apt_repository: repo='ppa:certbot/certbot' update_cache=yes
+    - name: Install certbot
+      apt: name={{ item }} state=latest
+      with_items:
+        - certbot
+        - python3-certbot-dns-cloudflare
+    - name: Copy cloudflare.ini
+      template: src=cloudflare.ini.j2 dest=/etc/letsencrypt/cloudflare.ini mode=0600 owner=root group=root
+    - name: Get SSL certificate
+      command: certbot certonly --reuse-key --must-staple --rsa-key-size 4096 --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini -d "{{ domain }}" -n -m "{{ le_email }}" --agree-tos --staging
+      args:
+        creates: "/etc/letsencrypt/renewal/{{ domain }}.conf"
+      notify: reload nginx
+    - name: Set up private key
+      block:
+        - name: Resolve symlinks
+          stat: path=/etc/letsencrypt/live/{{ domain }}/privkey.pem
+          register: pk
+        - name: Replace private key
+          copy: src={{ le_privkey }} dest={{ pk.stat.lnk_source }} owner=root group=root mode=0644 force=yes
+          register: key_changed
+        - name: Force renewal with the new key
+          command: certbot certonly --reuse-key --force-renewal --must-staple --rsa-key-size 4096 --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini -d "{{ domain }}" -n --staging
+          when: key_changed.changed
+      when: le_privkey != False
+    - name: Install SSL deploy hook
+      copy: src=reload-nginx dest=/etc/letsencrypt/renewal-hooks/deploy/reload-nginx mode=0755 owner=root group=root
+    - name: Install nginx.conf
+      copy: src=nginx.conf dest=/etc/nginx/nginx.conf mode=0644 owner=root group=root
+      notify: reload nginx
+    - name: Remove default site
+      file: name=/etc/nginx/sites-enabled/default state=absent
+      notify: reload nginx
+    - name: Install POP
+      template: src=pop.j2 dest=/etc/nginx/sites-available/{{ domain }} mode=0644 owner=root group=root force=yes
+      notify: reload nginx
+    - name: Enable POP
+      file: src=/etc/nginx/sites-available/{{ domain }} dest=/etc/nginx/sites-enabled/{{ domain }} state=link
+      notify: reload nginx
+    - name: Enable nginx
+      service: name=nginx enabled=yes state=started
+  handlers:
+    - name: reload nginx
+      service: name=nginx state=reloaded

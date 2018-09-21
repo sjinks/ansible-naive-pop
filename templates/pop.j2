@@ -1,0 +1,63 @@
+proxy_cache_path /var/lib/nginx/{{ domain }} levels=2 keys_zone={{ domain }}:20m max_size=512m inactive=20m;
+
+server {
+	listen 443 ssl http2;
+
+	server_name {{ domain }};
+
+	ssl_stapling on;
+	ssl_stapling_verify on;
+	ssl_certificate /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
+	ssl_trusted_certificate /etc/letsencrypt/live/{{ domain }}/chain.pem;
+
+	if ($request_method = POST) {
+		return 302 /;
+	}
+
+	location ~ \.php$ {
+		return 302 /;
+	}
+
+	location ~ /\.(?!well-known).* {
+		return 302 /;
+	}
+
+	location /wp-admin/ {
+		return 302 /;
+	}
+
+	proxy_http_version 1.1;
+	proxy_set_header Host $host;
+	proxy_set_header X-Real-IP $remote_addr;
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	proxy_pass_header Server;
+
+	proxy_ignore_headers Cache-Control Expires Set-Cookie;
+	proxy_cache_use_stale error timeout http_500 http_502 http_503 http_504;
+	proxy_cache_revalidate on;
+	proxy_cache_lock on;
+	proxy_cache {{ domain }};
+#	proxy_cache off;
+	proxy_cache_key $request_method|$host|$request_uri;
+	proxy_cache_valid 301 1h;
+	proxy_cache_valid 302 1h;
+	proxy_cache_valid 404 1h;
+	proxy_cache_valid 200 1h;
+
+	add_header X-Cache-Status $upstream_cache_status;
+
+	location / {
+		proxy_pass https://{{ upstream }};
+	}
+
+	location ~ ^/wp-content/(?:uploads|themes)/ {
+		proxy_pass https://{{ upstream }};
+		proxy_cache_valid 200 4h;
+	}
+
+	location ~ ^/wp-includes/(?:css|fonts|images|js)/ {
+		proxy_pass https://{{ upstream }};
+		proxy_cache_valid 200 4h;
+	}
+}

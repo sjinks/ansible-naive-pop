@@ -1,0 +1,16 @@
+---
+# IP or name of the upstream server
+upstream: 127.0.0.1
+
+# Cloudflare credentials, used by certbot to obtain SSL certificate
+cloudflare_email: change@me
+cloudflare_key: changeme
+
+# Domain for which PoP is created
+domain: example.com
+
+# Email address to register with Let's Encrypt
+le_email: change@me
+
+# Optional private key, if keys are to be reused and have to be the same across all PoPs
+le_privkey: False
